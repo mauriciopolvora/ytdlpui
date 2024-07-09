@@ -15,7 +15,7 @@ def my_hook(d, socketid):
             percent_value = float(match.group().strip('%'))
             socketio.emit("update progress", percent_value, to=socketid)
 
-def download_video(url, format, socketid):
+def download(url, format, socketid):
     # Define a wrapper function for the progress hook that includes socketid
     def progress_hook(d):
         return my_hook(d, socketid)
@@ -24,6 +24,10 @@ def download_video(url, format, socketid):
         'format': 'bestaudio/best' if format == 'mp3' else 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'progress_hooks': [progress_hook], 
         'outtmpl': f'%(title)s.%(ext)s',
+        'postprocessors': [{  # Extract audio using ffmpeg
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+        }]  if format == 'mp3' else [],
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -49,7 +53,7 @@ def update_downloads_list(filename):
 async def handle_request(socketid):
     url = request.form['url']
     format = request.form['format']
-    filename = download_video(url, format, socketid)
+    filename = download(url, format, socketid)
     update_downloads_list(filename)
     return Response(200)
 
@@ -65,12 +69,28 @@ def index():
         downloaded_files = []
     return render_template('index.html', downloaded_files=downloaded_files)
 
-@app.route('/static/<filename>')
+@app.route('/static/<filename>', methods=['GET'])
 def download_file(filename):
     try:
         return send_file(filename, as_attachment=True)
     except FileNotFoundError:
         abort(404)  # Return a 404 not found error if the file does not exist
+        
+@app.route('/delete/<filename>' , methods=['DELETE'])
+def delete_file(filename):
+    try:
+        print('deleting file', filename)
+        os.remove(filename)
+        print('file deleted')
+        with open('downloaded_files.txt', 'r') as file:
+            downloaded_files = file.read().strip().split('\n')
+        with open('downloaded_files.txt', 'w') as file:
+            for file_name in downloaded_files:
+                if file_name != filename:
+                    file.write(file_name + '\n')
+        return Response(status=200)
+    except FileNotFoundError:
+        abort(404)
 
 if __name__ == '__main__':
     socketio.run(app=app, debug=True, host="0.0.0.0", port = 5000)
